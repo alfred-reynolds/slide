@@ -1,6 +1,8 @@
 #include "mainwindow.h"
 #include "overlay.h"
 #include "ui_mainwindow.h"
+#include "imageswitcher.h"
+#include "logger.h"
 #include <QLabel>
 #include <QPixmap>
 #include <QBitmap>
@@ -14,7 +16,8 @@
 #include <QRect>
 #include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
-#include <sstream>
+#include <QApplication>
+#include <QScreen>
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -32,6 +35,16 @@ MainWindow::MainWindow(QWidget *parent) :
     label->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
     update();
 
+    QScreen* screen = QGuiApplication::primaryScreen();
+    if (screen)
+    {
+      connect(screen, SIGNAL(geometryChanged(QRect)), this, SLOT(checkWindowSize()));
+      connect(screen, SIGNAL(orientationChanged(Qt::ScreenOrientation)), this, SLOT(checkWindowSize()));
+      screen->setOrientationUpdateMask(Qt::LandscapeOrientation |
+                                      Qt::PortraitOrientation |
+                                      Qt::InvertedLandscapeOrientation |
+                                      Qt::InvertedPortraitOrientation);
+    }
 }
 
 MainWindow::~MainWindow()
@@ -105,82 +118,83 @@ bool MainWindow::event(QEvent* event)
 void MainWindow::resizeEvent(QResizeEvent* event)
 {
    QMainWindow::resizeEvent(event);
-   updateImage(true);
+   this->findChild<QLabel*>("image")->clear();
+   updateImage();
 }
 
-void MainWindow::setImage(std::string path)
+void MainWindow::checkWindowSize()
 {
-    currentImage = path;
-    updateImage(false);
-}
-
-int MainWindow::getImageRotation()
-{
-    if (currentImage == "")
-        return 0;
-
-    int orientation = 0;
-    ExifData *exifData = exif_data_new_from_file(currentImage.c_str());
-    if (exifData)
+  QScreen *screen = QGuiApplication::primaryScreen();
+  if (screen != nullptr)
+  {
+    QSize screenSize = screen->geometry().size();
+    if(size() != screenSize)
     {
-      ExifByteOrder byteOrder = exif_data_get_byte_order(exifData);
-      ExifEntry *exifEntry = exif_data_get_entry(exifData, EXIF_TAG_ORIENTATION);
+      Log("Resizing Window", screenSize.width(), "," , screenSize.height() );
+      setFixedSize(screenSize);
+      updateImage();
+    }
 
-      if (exifEntry)
+    if (imageAspectMatchesMonitor)
+    {
+      bool isLandscape = screenSize.width() > screenSize.height();
+      ImageAspectScreenFilter newAspect = isLandscape ? ImageAspectScreenFilter_Landscape : ImageAspectScreenFilter_Portrait;
+      if (newAspect != baseImageOptions.onlyAspect)
       {
-        orientation = exif_get_short(exifEntry->data, byteOrder);
+        Log("Changing image orientation to ", newAspect);
+        baseImageOptions.onlyAspect = newAspect;
+        currentImage.filename = "";
+        warn("Monitor aspect changed, updating image...");
+        repaint(); // force an immediate redraw as we might block for a while loading the next image
+        if (switcher != nullptr)
+        {
+          // pick a new image as our aspect changed, we can't just resize the image
+          switcher->scheduleImageUpdate();
+        }
       }
-      exif_data_free(exifData);
     }
-
-    int degrees = 0;
-    switch(orientation) {
-        case 8:
-        degrees = 270;
-        break;
-        case 3:
-        degrees = 180;
-        break;
-        case 6:
-        degrees = 90;
-        break;
-    }
-
-    return degrees;
+  }
 }
 
-void MainWindow::updateImage(bool immediately)
+
+void MainWindow::setImage(const ImageDetails &imageDetails)
 {
-    if (currentImage == "")
+    currentImage = imageDetails;
+    updateImage();
+}
+
+void MainWindow::updateImage()
+{
+    checkWindowSize();
+    if (currentImage.filename == "")
       return;
 
     QLabel *label = this->findChild<QLabel*>("image");
     const QPixmap* oldImage = label->pixmap();
-    if (oldImage != NULL && !immediately)
+    if (oldImage != NULL && transitionSeconds > 0)
     {
       QPalette palette;
       palette.setBrush(QPalette::Background, *oldImage);
       this->setPalette(palette);
     }
 
-    QPixmap p( currentImage.c_str() );
-    if(debugMode)
-    {
-      std::cout << "size:" << p.width() << "x" << p.height() << std::endl;
-    }
+    QPixmap p;
+    p.load( currentImage.filename.c_str() );
+
+    Log("size:", p.width(), "x", p.height(), "(window:", width(), ",", height(), ")");
 
     QPixmap rotated = getRotatedPixmap(p);
     QPixmap scaled = getScaledPixmap(rotated);
     QPixmap background = getBlurredBackground(rotated, scaled);
     drawForeground(background, scaled);
     
-    if (overlay != NULL)
+    if (overlay != nullptr)
     {
-      drawText(background, overlay->getMarginTopLeft(), overlay->getFontsizeTopLeft(), overlay->getRenderedTopLeft(currentImage).c_str(), Qt::AlignTop|Qt::AlignLeft);
-      drawText(background, overlay->getMarginTopRight(), overlay->getFontsizeTopRight(), overlay->getRenderedTopRight(currentImage).c_str(), Qt::AlignTop|Qt::AlignRight);
-      drawText(background, overlay->getMarginBottomLeft(), overlay->getFontsizeBottomLeft(), overlay->getRenderedBottomLeft(currentImage).c_str(), Qt::AlignBottom|Qt::AlignLeft);
-      drawText(background, overlay->getMarginBottomRight(), overlay->getFontsizeBottomRight(), overlay->getRenderedBottomRight(currentImage).c_str(), Qt::AlignBottom|Qt::AlignRight);
-      if (debugMode)
+      drawText(background, overlay->getMarginTopLeft(), overlay->getFontsizeTopLeft(), overlay->getRenderedTopLeft(currentImage.filename).c_str(), Qt::AlignTop|Qt::AlignLeft);
+      drawText(background, overlay->getMarginTopRight(), overlay->getFontsizeTopRight(), overlay->getRenderedTopRight(currentImage.filename).c_str(), Qt::AlignTop|Qt::AlignRight);
+      drawText(background, overlay->getMarginBottomLeft(), overlay->getFontsizeBottomLeft(), overlay->getRenderedBottomLeft(currentImage.filename).c_str(), Qt::AlignBottom|Qt::AlignLeft);
+      drawText(background, overlay->getMarginBottomRight(), overlay->getFontsizeBottomRight(), overlay->getRenderedBottomRight(currentImage.filename).c_str(), Qt::AlignBottom|Qt::AlignRight);
+      if (ShouldLog())
       {
         // draw a thumbnail version of the source image in the bottom left, to check for cropping issues
         QPainter pt(&background);
@@ -199,13 +213,13 @@ void MainWindow::updateImage(bool immediately)
 
     label->setPixmap(background);
 
-    if (oldImage != NULL && !immediately)
+    if (oldImage != NULL && transitionSeconds > 0)
     {
       auto effect = new QGraphicsOpacityEffect(label);
       effect->setOpacity(0.0);
       label->setGraphicsEffect(effect);
       QPropertyAnimation* animation = new QPropertyAnimation(effect, "opacity");
-      animation->setDuration(1000);
+      animation->setDuration(transitionSeconds*1000);
       animation->setStartValue(0);
       animation->setEndValue(1);
       animation->start(QAbstractAnimation::DeleteWhenStopped);
@@ -215,9 +229,8 @@ void MainWindow::updateImage(bool immediately)
 }
 
 void MainWindow::drawText(QPixmap& image, int margin, int fontsize, QString text, int alignment) {
-  //std::cout << "text: " << text.toStdString()  << " margin: " << margin << " fontsize: " << fontsize<< std::endl;
   QPainter pt(&image);
-  pt.setPen(QPen(Qt::white));
+  pt.setPen(QPen(QColor(overlayHexRGB)));
   pt.setFont(QFont("Sans", fontsize, QFont::Bold));
   QRect marginRect = image.rect().adjusted(
       margin,
@@ -234,21 +247,18 @@ void MainWindow::drawForeground(QPixmap& background, const QPixmap& foreground) 
     pt.drawPixmap((background.width()-foreground.width())/2, (background.height()-foreground.height())/2, foreground);
 }
 
-void MainWindow::setOverlay(Overlay* o)
+void MainWindow::setOverlay(std::unique_ptr<Overlay> &o)
 {
-  overlay = o;
-}
-
-void MainWindow::setAspect(char aspectIn)
-{
-  aspect = aspectIn;
+  overlay = std::move(o);
 }
 
 QPixmap MainWindow::getBlurredBackground(const QPixmap& originalSize, const QPixmap& scaled)
 {
-    if (fitAspectAxisToWindow) {
-      // our scaled version will just fill the whole screen, us it directly
-      return scaled.copy();
+    if (currentImage.options.fitAspectAxisToWindow) {
+      // our scaled version will just fill the whole screen, use it directly
+      //Log("Using scaled image");
+      QRect rect((scaled.width() - width())/2, 0, width(), height());
+      return scaled.copy(rect);
     } else if (scaled.width() < width()) {
       QPixmap background = blur(originalSize.scaledToWidth(width(), Qt::SmoothTransformation));
       QRect rect(0, (background.height() - height())/2, width(), height());
@@ -264,26 +274,40 @@ QPixmap MainWindow::getBlurredBackground(const QPixmap& originalSize, const QPix
 QPixmap MainWindow::getRotatedPixmap(const QPixmap& p)
 {
     QMatrix matrix;
-    matrix.rotate(getImageRotation());
+    matrix.rotate(currentImage.rotation);
     return p.transformed(matrix);
 }
 
 QPixmap MainWindow::getScaledPixmap(const QPixmap& p)
 {
-  if (fitAspectAxisToWindow)
+  if (currentImage.options.fitAspectAxisToWindow)
   {
-    if ( aspect == 'p')
+    bool stretchWidth = currentImage.aspect() == ImageAspect_Landscape;
+    bool stretchHeight = currentImage.aspect() == ImageAspect_Portrait;
+    // check the stretched image will naturally fill the screen for its aspect ratio
+    if (stretchHeight && (width() > ((double)height()/p.height())*p.width()))
+    {
+      // stretched via height won't fill the width, so stretch the other way
+      stretchHeight = false;
+      stretchWidth = true;
+    }
+    else if (stretchWidth && (height() > ((double)width()/p.width())*p.height()))
+    {
+      // stretched via width won't fill the width, so stretch the other way
+      stretchWidth = false;
+      stretchHeight = true;
+    }
+
+    if (stretchHeight)
     {
       // potrait mode, make height of image fit screen and crop top/bottom
       QPixmap pTemp = p.scaledToHeight(height(), Qt::SmoothTransformation);
       return pTemp.copy(0,0,width(),height());
     }
-    else if ( aspect == 'l')
+    else if (stretchWidth)
     {
       // landscape mode, make width of image fit screen and crop top/bottom
       QPixmap pTemp = p.scaledToWidth(width(), Qt::SmoothTransformation);
-      //int imageTempWidth = pTemp.width();
-      //int imageTempHeight = pTemp.height();
       return pTemp.copy(0,0,width(),height());
     }
   }
@@ -337,8 +361,38 @@ void MainWindow::setBackgroundOpacity(unsigned int backgroundOpacity)
     this->backgroundOpacity = backgroundOpacity;
 }
 
+void MainWindow::setOverlayHexRGB(QString overlayHexRGB)
+{
+    this->overlayHexRGB = overlayHexRGB;
+}
+
+void MainWindow::setTransitionTime(unsigned int transitionSeconds)
+{
+    this->transitionSeconds = transitionSeconds;
+}
+
 void MainWindow::warn(std::string text)
 {
   QLabel *label = this->findChild<QLabel*>("image");
   label->setText(text.c_str());
+}
+
+void MainWindow::setBaseOptions(const ImageDisplayOptions &baseOptionsIn) 
+{ 
+  baseImageOptions = baseOptionsIn; 
+  if(baseImageOptions.onlyAspect == ImageAspectScreenFilter_Monitor)
+  {
+    imageAspectMatchesMonitor = true;
+    baseImageOptions.onlyAspect = width() >= height() ? ImageAspectScreenFilter_Landscape : ImageAspectScreenFilter_Portrait;
+  }
+}
+
+void MainWindow::setImageSwitcher(ImageSwitcher *switcherIn)
+{
+   switcher = switcherIn; 
+}
+
+const ImageDisplayOptions &MainWindow::getBaseOptions() 
+{
+   return baseImageOptions; 
 }
