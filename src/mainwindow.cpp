@@ -24,7 +24,7 @@ MainWindow::MainWindow(QWidget *parent) :
     ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
-    setWindowFlags(windowFlags() | Qt::WindowStaysOnTopHint);
+    setWindowFlags(windowFlags() | Qt::WindowStaysOnTopHint | Qt::X11BypassWindowManagerHint);
 
     setAttribute(Qt::WA_AcceptTouchEvents);
 
@@ -384,6 +384,7 @@ void MainWindow::setBaseOptions(const ImageDisplayOptions &baseOptionsIn)
   {
     imageAspectMatchesMonitor = true;
     baseImageOptions.onlyAspect = width() >= height() ? ImageAspectScreenFilter_Landscape : ImageAspectScreenFilter_Portrait;
+    switcher->scheduleImageUpdate();
   }
 }
 
