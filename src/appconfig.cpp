@@ -71,6 +71,11 @@ Config loadConfiguration(const std::string &configFilePath, const Config &curren
   file.open(QIODevice::ReadOnly | QIODevice::Text);
   val = file.readAll();
   file.close();
+  if (val.length() <= 1 )
+  {
+    Log( "Failed to read options file: ", jsonFile.toStdString() );
+    return currentConfig; // nothing to load
+  }
   QJsonDocument d = QJsonDocument::fromJson(val.toUtf8());
   QJsonObject jsonDoc = d.object();
   SetJSONBool(userConfig.baseDisplayOptions.fitAspectAxisToWindow, jsonDoc, "stretch");

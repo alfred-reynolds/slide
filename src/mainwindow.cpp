@@ -29,7 +29,20 @@ MainWindow::MainWindow(QWidget *parent) :
     setAttribute(Qt::WA_AcceptTouchEvents);
 
     QTimer::singleShot(5, this, SLOT(showFullScreen()));
-    QApplication::setOverrideCursor(Qt::BlankCursor);
+    //QApplication::setOverrideCursor(Qt::BlankCursor);
+
+    // BUGBUG - with the move to Debian bookworm and the Wayland renderer
+    //  the setOverrideCursor call above stopped hiding the cursor. So instead set
+    //  and empty image for the window cursor.
+    QImage imageBit(1,1, QImage::Format_Mono);
+    imageBit.fill(Qt::color0);
+    QImage imageMsk(1,1, QImage::Format_Mono);
+    imageMsk.fill(Qt::color1);
+    QBitmap bitmapBit = QBitmap::fromImage(imageBit);
+    QBitmap bitmapMsk = QBitmap::fromImage(imageMsk);
+    QCursor cursor = QCursor(bitmapBit, bitmapMsk, 0, 0);
+    this->setCursor(cursor);
+
     QLabel *label = this->findChild<QLabel*>("image");
     setCentralWidget(label);
     label->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
@@ -130,7 +143,7 @@ void MainWindow::checkWindowSize()
     QSize screenSize = screen->geometry().size();
     if(size() != screenSize)
     {
-      Log("Resizing Window", screenSize.width(), "," , screenSize.height() );
+      Log("Resizing Window ", screenSize.width(), "," , screenSize.height() );
       setFixedSize(screenSize);
       updateImage();
     }
@@ -194,7 +207,7 @@ void MainWindow::updateImage()
       drawText(background, overlay->getMarginTopRight(), overlay->getFontsizeTopRight(), overlay->getRenderedTopRight(currentImage.filename).c_str(), Qt::AlignTop|Qt::AlignRight);
       drawText(background, overlay->getMarginBottomLeft(), overlay->getFontsizeBottomLeft(), overlay->getRenderedBottomLeft(currentImage.filename).c_str(), Qt::AlignBottom|Qt::AlignLeft);
       drawText(background, overlay->getMarginBottomRight(), overlay->getFontsizeBottomRight(), overlay->getRenderedBottomRight(currentImage.filename).c_str(), Qt::AlignBottom|Qt::AlignRight);
-      if (ShouldLog())
+      /*if (ShouldLog())
       {
         // draw a thumbnail version of the source image in the bottom left, to check for cropping issues
         QPainter pt(&background);
@@ -208,7 +221,7 @@ void MainWindow::updateImage()
         pt.drawPixmap( background.width() - thumbNail.width() - margin,
                      background.height()-thumbNail.height() - margin, 
                      thumbNail);
-      }
+      }*/
     }
 
     label->setPixmap(background);
@@ -380,6 +393,7 @@ void MainWindow::warn(std::string text)
 void MainWindow::setBaseOptions(const ImageDisplayOptions &baseOptionsIn) 
 { 
   baseImageOptions = baseOptionsIn; 
+  imageAspectMatchesMonitor = false;
   if(baseImageOptions.onlyAspect == ImageAspectScreenFilter_Monitor)
   {
     imageAspectMatchesMonitor = true;
