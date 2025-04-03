@@ -167,6 +167,12 @@ void MainWindow::checkWindowSize()
       }
     }
   }
+  // make sure we are still fullscreen
+  bool isFullScreen = windowState().testFlag(Qt::WindowFullScreen);
+  if (!isFullScreen)
+  {
+    QTimer::singleShot(5, this, SLOT(showFullScreen()));
+  }
 }
 
 
@@ -183,11 +189,11 @@ void MainWindow::updateImage()
       return;
 
     QLabel *label = this->findChild<QLabel*>("image");
-    const QPixmap* oldImage = label->pixmap();
-    if (oldImage != NULL && transitionSeconds > 0)
+    QPixmap oldImage = label->pixmap(Qt::ReturnByValue);
+    if (!oldImage.isNull() && transitionSeconds > 0)
     {
       QPalette palette;
-      palette.setBrush(QPalette::Background, *oldImage);
+      palette.setBrush(QPalette::Window, oldImage);
       this->setPalette(palette);
     }
 
@@ -226,7 +232,7 @@ void MainWindow::updateImage()
 
     label->setPixmap(background);
 
-    if (oldImage != NULL && transitionSeconds > 0)
+    if (!oldImage.isNull() && transitionSeconds > 0)
     {
       auto effect = new QGraphicsOpacityEffect(label);
       effect->setOpacity(0.0);
@@ -286,9 +292,9 @@ QPixmap MainWindow::getBlurredBackground(const QPixmap& originalSize, const QPix
 
 QPixmap MainWindow::getRotatedPixmap(const QPixmap& p)
 {
-    QMatrix matrix;
-    matrix.rotate(currentImage.rotation);
-    return p.transformed(matrix);
+    QTransform transform;
+    transform.rotate(currentImage.rotation);
+    return p.transformed(transform);
 }
 
 QPixmap MainWindow::getScaledPixmap(const QPixmap& p)
@@ -338,12 +344,12 @@ void MainWindow::drawBackground(const QPixmap& originalSize, const QPixmap& scal
         QPixmap background = blur(originalSize.scaledToHeight(height()));
         QRect rect((background.width() - width())/2, 0, width(), height());
         background = background.copy(rect);
-        palette.setBrush(QPalette::Background, background);
+        palette.setBrush(QPalette::Window, background);
     } else {
         QPixmap background = blur(originalSize.scaledToHeight(height()));
         QRect rect((background.width() - width())/2, 0, width(), height());
         background = background.copy(rect);
-        palette.setBrush(QPalette::Background, background);
+        palette.setBrush(QPalette::Window, background);
     }
     this->setPalette(palette);
 }
