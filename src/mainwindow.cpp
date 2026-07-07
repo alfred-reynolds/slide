@@ -167,6 +167,12 @@ void MainWindow::checkWindowSize()
       }
     }
   }
+  // make sure we are still fullscreen
+  bool isFullScreen = windowState().testFlag(Qt::WindowFullScreen);
+  if (!isFullScreen)
+  {
+    QTimer::singleShot(5, this, SLOT(showFullScreen()));
+  }
 }
 
 
@@ -183,8 +189,8 @@ void MainWindow::updateImage()
       return;
 
     QLabel *label = this->findChild<QLabel*>("image");
-    const QPixmap oldImage = label->pixmap(Qt::ReturnByValue);
-    if ( !oldImage.isNull() && transitionSeconds > 0)
+    QPixmap oldImage = label->pixmap(Qt::ReturnByValue);
+    if (!oldImage.isNull() && transitionSeconds > 0)
     {
       QPalette palette;
       palette.setBrush(QPalette::Window, oldImage);
@@ -286,7 +292,6 @@ QPixmap MainWindow::getBlurredBackground(const QPixmap& originalSize, const QPix
 
 QPixmap MainWindow::getRotatedPixmap(const QPixmap& p)
 {
-   // QMatrix matrix;
     QTransform matrix;
     matrix.rotate(currentImage.rotation);
     return p.transformed(matrix);
